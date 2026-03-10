@@ -19,9 +19,9 @@ This course walks through a real-world people analytics use case: **evaluating w
 
 ## Prerequisites
 
-- Working knowledge of Python (pandas, numpy)
 - Familiarity with regression concepts (OLS, logistic regression)
 - Basic understanding of causal inference concepts (confounding, selection bias) is helpful but not required — the course materials cover these
+- Working knowledge of Python (pandas, numpy) or similar language (R) also helpful but not required
 
 ---
 
@@ -31,7 +31,9 @@ No local installation required. Everything runs in your browser.
 
 ### Step 1: Open the Main Notebook in Colab
 
-[![Click Here to Open in Colab!](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/mlpost/2026-siop-causal-inference-master-tutorial/blob/main/scenario2_workshop.ipynb)
+<a href="[https://colab.research.google.com/github/your-username/your-repo/blob/main/tutorial.ipynb](https://colab.research.google.com/github/mlpost/2026-siop-causal-inference-master-tutorial/blob/main/scenario2_workshop.ipynb)" target="_blank">
+  <img src="https://colab.research.google.com/assets/colab-badge.svg" alt="Click Here to Open in Colab!"/>
+</a
 
 ### Step 2: Clone the Repo
 
