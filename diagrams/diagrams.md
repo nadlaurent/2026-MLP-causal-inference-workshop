@@ -1,36 +1,3 @@
-### Causal DAG (Directed Acyclic Graph)
-
-Self-selection creates confounding: the same factors that drive participation also affect outcomes.
-
-```mermaid
-flowchart LR
-    subgraph DAG2["Open Enrollment Rollout"]
-        direction LR
-        
-        X2["📋 <b>X</b><br/>Observed Covariates<br/>(Demographics,<br/>Dept, Performance)"]
-        P["📢 <b>P</b><br/>Promotion<br/>Intensity"]
-        U["❓ <b>U</b><br/>Unobserved<br/>(Motivation,<br/>Career Ambition)"]
-        T2["💼 <b>T</b><br/>Treatment<br/>(Voluntary Enrollment)"]
-        Y2["📈 <b>Y</b><br/>Outcomes<br/>(Retention, Survey Scores,<br/>Turnover Intent)"]
-        
-        X2 --> P
-        X2 --> T2
-        X2 --> Y2
-        P --> T2
-        U -.-> T2
-        U -.-> Y2
-        T2 --> Y2
-    end
-    
-    style X2 fill:#fff9c4,stroke:#f9a825,color:#000
-    style P fill:#ffccbc,stroke:#d84315,color:#000
-    style U fill:#ffcdd2,stroke:#d32f2f,color:#000,stroke-dasharray: 5 5
-    style T2 fill:#ffe0b2,stroke:#ef6c00,color:#000
-    style Y2 fill:#d1c4e9,stroke:#512da8,color:#000
-```
-
-
-
 ### Decision Flow
 
 ```mermaid

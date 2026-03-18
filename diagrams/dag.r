@@ -12,9 +12,27 @@
 # organization in particular -> promotion intensity -> treatment
 
 # Load required libraries
+library(dagitty)
 library(ggdag)
 library(tidyverse) 
 library(ggplot2)
+
+# Define node coordinates (coord_df method per ggdag manual)
+# Layout: left-to-right causal flow; confounders on left, treatment center, outcome right
+coord_df <- data.frame(
+  name = c(
+    "employee_demographics", 
+    "performance_career", 
+    "role_structure",
+    "baseline_scores", 
+    "organization", 
+    "promotion_intensity",
+    "manager_training", 
+    "outcomes"
+  ),
+  x = c(1.5, 1.25, 1.25, 1.5, 1.75, 3, 5, 5),
+  y = c(2, 1, 0, -1, -1.5, -1.5, -0.5, 0.5)
+)
 
 # Define the DAG structure using dagify()
 # Note: ggdag uses ~ syntax where outcome ~ exposure means exposure -> outcome
@@ -46,45 +64,28 @@ manager_training_dag <- dagify(
   # Baseline Survey Scores
   manager_training ~ baseline_scores,
   outcomes ~ baseline_scores,
+
   
-  # Promotion intensity effects on outcomes
-  outcomes ~ promotion_intensity,
-  
-  # Define node coordinates for clean layout
-  coords = list(
-    x = c(manager_training = 4, 
-          outcomes = 6,
-          organization = 1, 
-          promotion_intensity = 2.5,
-          employee_demographics = 1, 
-          performance_career = 1.5,
-          role_structure = 2, 
-          baseline_scores = 2.5),
-    y = c(manager_training = 3.5,
-          outcomes = 3.5,
-          organization = 4.2, 
-          promotion_intensity = 4,
-          employee_demographics = 2.5, 
-          performance_career = 1.5,
-          role_structure = 1, 
-          baseline_scores = 3)
-  ),
+
   
   # Define node labels for display
   labels = c(
-    manager_training = "Manager\nTraining",
-    outcomes = "Outcomes\n(Efficacy, Workload,\nTurnover, Retention)",
-    organization = "Organization",
-    promotion_intensity = "Promotion\nIntensity",
-    employee_demographics = "Employee\nDemographics",
-    performance_career = "Performance\n& Career",
-    role_structure = "Role &\nStructure",
-    baseline_scores = "Baseline\nSurvey Scores"
+    manager_training = "Manager Training\n(T)",
+    outcomes = "Outcomes\n(Efficacy, Workload,\nTurnover, Retention)\n(Y)",
+    organization = "Organization\n(X)",
+    promotion_intensity = "Promotion\nIntensity\n(M)",
+    employee_demographics = "Employee\nDemographics\n(X)",
+    performance_career = "Performance\n& Career\n(X)",
+    role_structure = "Role &\nStructure\n(X)",
+    baseline_scores = "Baseline\nSurvey Scores\n(X)"
   ),
   
   # Define exposure and outcome for highlighting
   exposure = "manager_training",
-  outcome = "outcomes"
+  outcome = "outcomes",
+
+  # Explicit node coordinates (coord_df method)
+  coords = coord_df
 )
 
 # Role mapping for causal inference legend:
@@ -96,20 +97,26 @@ role_mapping <- c(
   manager_training = "Treatment (Exposure)",
   outcomes = "Outcome",
   promotion_intensity = "Mediator",
-  organization = "Confounder",
-  employee_demographics = "Confounder",
-  performance_career = "Confounder",
-  role_structure = "Confounder",
-  baseline_scores = "Confounder"
+  organization = "Adjusted Confounder",
+  employee_demographics = "Adjusted Confounder",
+  performance_career = "Adjusted Confounder",
+  role_structure = "Adjusted Confounder",
+  baseline_scores = "Adjusted Confounder"
 )
 role_colors <- c(
   "Treatment (Exposure)" = "#2E86AB",
   "Outcome" = "#A23B72",
   "Mediator" = "#C73E1D",
-  "Confounder" = "#6B7280"
+  "Adjusted Confounder" = "#6B7280"
+)
+role_shapes <- c(
+  "Treatment (Exposure)" = 19,
+  "Outcome" = 19,
+  "Mediator" = 19,
+  "Adjusted Confounder" = 15
 )
 
-# Create the main DAG visualization
+# Create the main DAG visualization (per ggdag vignette)
 dag_plot <- manager_training_dag %>%
   tidy_dagitty() %>%
   mutate(role = recode(name, !!!role_mapping)) %>%
@@ -119,11 +126,12 @@ dag_plot <- manager_training_dag %>%
     edge_width = 0.8,
     arrow = grid::arrow(length = grid::unit(8, "pt"), type = "closed")
   ) +
-  geom_dag_point(aes(color = role), size = 12, alpha = 0.9, stroke = 0) +
+  geom_dag_point(aes(color = role, shape = role), size = 12, alpha = 0.9, stroke = 0) +
   geom_dag_label_repel(
     aes(label = label, fill = role),
     color = "white",
     size = 3.2,
+    alpha = 0.75,
     fontface = "bold",
     box.padding = grid::unit(0.4, "lines"),
     point.padding = grid::unit(2, "lines"),
@@ -141,15 +149,22 @@ dag_plot <- manager_training_dag %>%
     values = role_colors,
     breaks = names(role_colors)
   ) +
+  scale_shape_manual(
+    name = "",
+    values = role_shapes,
+    breaks = names(role_shapes)
+  ) +
   guides(
     color = guide_legend(
       title = "",
-      override.aes = list(size = 5),
+      override.aes = list(size = 5, shape = c(19, 19, 19, 15)),
       order = 1
     ),
-    fill = "none"
+    fill = "none",
+    shape = "none"
   ) +
-  theme_dag_blank() +
+  theme_dag() +
+  expand_plot() +
   labs(
     title = "Manager Training Impact: Causal DAG",
   ) +
@@ -160,7 +175,7 @@ dag_plot <- manager_training_dag %>%
     legend.position = "right",
     legend.title = element_text(size = 11, face = "bold"),
     legend.text = element_text(size = 9),
-    aspect.ratio = 0.5  # Wider panel (height = 50% of width); counters label repulsion stretch
+    aspect.ratio = 0.5
   )
 
 # Display the main plot
@@ -169,6 +184,4 @@ print(dag_plot)
 
 # Save plot
 ggsave("./diagrams/manager_training_dag.png", dag_plot, width = 12, height = 8, dpi = 300)
-
-
 
