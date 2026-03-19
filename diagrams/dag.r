@@ -185,3 +185,110 @@ print(dag_plot)
 # Save plot
 ggsave("./diagrams/manager_training_dag.png", dag_plot, width = 12, height = 8, dpi = 300)
 
+
+# ---- Simplified DAG: Performance & Career Focus (use for collider teaching demo) ----
+# 3 nodes only: Performance & Career, Manager Training, Outcomes
+
+# Define node coordinates for simplified 3-node layout (left-to-right)
+coord_df_simple <- data.frame(
+  name = c("performance_career", "manager_training", "outcomes"),
+  x = c(1, 3, 3),
+  y = c(0, 0.25, -0.25)
+)
+
+# Define the simplified DAG structure
+manager_training_dag_simple <- dagify(
+  manager_training ~ performance_career,
+  outcomes ~ performance_career,
+  outcomes ~ manager_training,
+  labels = c(
+    manager_training = "Manager Training\n(T)",
+    outcomes = "Outcomes\n(Efficacy, Workload,\nTurnover, Retention)\n(Y)",
+    performance_career = "Performance\n& Career\n(X)"
+  ),
+  exposure = "manager_training",
+  outcome = "outcomes",
+  coords = coord_df_simple
+)
+
+# Role mapping for simplified DAG (subset: Treatment, Outcome, Adjusted Confounder)
+role_mapping_simple <- c(
+  manager_training = "Treatment (Exposure)",
+  outcomes = "Outcome",
+  performance_career = "Adjusted Confounder"
+)
+role_colors_simple <- c(
+  "Treatment (Exposure)" = "#2E86AB",
+  "Outcome" = "#A23B72",
+  "Adjusted Confounder" = "#6B7280"
+)
+role_shapes_simple <- c(
+  "Treatment (Exposure)" = 19,
+  "Outcome" = 19,
+  "Adjusted Confounder" = 15
+)
+
+# Create the simplified DAG visualization (same formatting as main DAG)
+dag_plot_simple <- manager_training_dag_simple %>%
+  tidy_dagitty() %>%
+  mutate(role = recode(name, !!!role_mapping_simple)) %>%
+  ggplot(aes(x = x, y = y, xend = xend, yend = yend)) +
+  geom_dag_edges_link(
+    edge_color = "grey60",
+    edge_width = 0.8,
+    arrow = grid::arrow(length = grid::unit(8, "pt"), type = "closed")
+  ) +
+  geom_dag_point(aes(color = role, shape = role), size = 12, alpha = 0.9, stroke = 0) +
+  geom_dag_label_repel(
+    aes(label = label, fill = role),
+    color = "white",
+    size = 3.2,
+    alpha = 0.75,
+    fontface = "bold",
+    box.padding = grid::unit(0.4, "lines"),
+    point.padding = grid::unit(2, "lines"),
+    force = 2,
+    max.iter = 5000,
+    show.legend = FALSE
+  ) +
+  scale_color_manual(
+    name = "",
+    values = role_colors_simple,
+    breaks = names(role_colors_simple)
+  ) +
+  scale_fill_manual(
+    name = "",
+    values = role_colors_simple,
+    breaks = names(role_colors_simple)
+  ) +
+  scale_shape_manual(
+    name = "",
+    values = role_shapes_simple,
+    breaks = names(role_shapes_simple)
+  ) +
+  guides(
+    color = guide_legend(
+      title = "",
+      override.aes = list(size = 5, shape = c(19, 19, 15)),
+      order = 1
+    ),
+    fill = "none",
+    shape = "none"
+  ) +
+  theme_dag() +
+  expand_plot() +
+  theme(
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(size = 12, hjust = 0.5, color = "grey40"),
+    plot.caption = element_text(size = 10, color = "grey50"),
+    legend.position = "right",
+    legend.title = element_text(size = 11, face = "bold"),
+    legend.text = element_text(size = 9),
+    aspect.ratio = 0.5
+  )
+
+# Display the simplified plot
+print(dag_plot_simple)
+
+# Save simplified plot
+ggsave("./diagrams/dag_collider_ex.png", dag_plot_simple, width = 12, height = 8, dpi = 300)
