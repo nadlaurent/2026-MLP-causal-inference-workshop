@@ -310,7 +310,7 @@ report = CausalInferenceModel.generate_survival_summary_report(summary, evalues,
 | Binary outcome auto-detection | `analyze_treatment_effect()` and `dml_estimate_treatment_effects()` check if outcome values ⊆ {0, 1} and switch to Binomial family / `discrete_outcome=True` automatically. |
 | Baseline vars excluded from PS | By design. If you add a new baseline variable, you must pass it as `baseline_var=` (not in `continuous_vars`) for it to be correctly routed. |
 | `correction_method` in `analyze_treatment_effect()` | **Deprecated** — this parameter is ignored. FDR correction now happens in `build_summary_table()` across outcomes. |
-| DML clustering | DML does **not** handle clustering (`team_id`). Standard errors may be anti-conservative. Use IPTW/GEE for cluster-robust inference. |
+| DML clustering | The econml-based CATE analysis (`dml_estimate_treatment_effects()`) does **not** handle clustering (`team_id`), so its standard errors may be anti-conservative. For cluster-robust ATE estimation, use `dml_cluster_robust_ate()` which provides native cluster support via `doubleml`. |
 | New manager baseline = 0 | `baseline_manager_efficacy` is 0 (not NaN) for new managers. This is intentional — it represents "no prior manager-level data." |
 | Survival analysis date format | `exit_date` uses M/D/YYYY without zero-padding. Pass `date_format='mixed'` to `prepare_survival_data()`. |
 | No ATT for retention | The notebook only runs ATE for survival outcomes. ATT is supported but not demonstrated for retention. |
