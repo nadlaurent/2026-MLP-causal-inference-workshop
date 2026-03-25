@@ -18,12 +18,13 @@ class (aliased as ``IPTWGEEModel`` for backward compatibility).
 
 Three complementary estimation approaches are supported:
 
-1. **IPTW + Doubly Robust GEE** — continuous / binary survey outcomes
+1. **IPTW + Covariate-Adjusted GEE** — continuous / binary survey outcomes
    (``analyze_treatment_effect``)
 2. **IPTW + Cox Proportional Hazards** — time-to-event (survival) outcomes
    (``analyze_survival_effect``), with optional piecewise (per-interval) HRs
-3. **Double Machine Learning (DML)** — ATE / ATT / CATE via ``econml``
-   (``dml_estimate_treatment_effects``)
+3. **Double Machine Learning (DML)** — cluster-robust ATE via ``doubleml``
+    and CATE exploration via ``econml``
+    (``dml_cluster_robust_ate`` / ``dml_estimate_treatment_effects``)
 
 Shared IPTW infrastructure (data prep, one-hot encoding, column sanitization,
 propensity score estimation, weight diagnostics, overlap/weight plotting, and
@@ -41,7 +42,7 @@ Building blocks (also usable standalone)
         Fit propensity score model and compute stabilized IPTW weights.
     ``compute_weight_diagnostics``
         Effective sample size (ESS) and weight summary statistics.
-    ``fit_doubly_robust_model``
+    ``fit_iptw_outcome_model``
         IPTW-weighted GEE with covariate adjustment.
     ``plot_propensity_overlap``
         Propensity score overlap density plot (delegates to CausalDiagnostics).
@@ -52,7 +53,7 @@ Building blocks (also usable standalone)
 
 High-level analysis (recommended entry points)
     ``analyze_treatment_effect``
-        Full IPTW + doubly robust GEE pipeline for survey outcomes.
+        Full IPTW + covariate-adjusted GEE pipeline for survey outcomes.
     ``analyze_survival_effect``
         Full IPTW + Cox PH pipeline for time-to-event outcomes; supports
         piecewise (quarterly) hazard ratios via ``_fit_cox_model`` with
@@ -84,7 +85,8 @@ Deprecated
 
 Dependencies
 ------------
-statsmodels, pandas, numpy, scipy, scikit-learn, matplotlib, lifelines, econml
+statsmodels, pandas, numpy, scipy, scikit-learn, matplotlib, lifelines,
+doubleml, econml
 
 Notes
 -----
@@ -120,6 +122,7 @@ from scipy.stats import norm
 from typing import Dict, List, Optional, Tuple, Union
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.model_selection import train_test_split
+from doubleml import DoubleMLData, DoubleMLPLR
 from econml.dml import DML, CausalForestDML
 from econml.sklearn_extensions.linear_model import StatsModelsLinearRegression
 from econml.cate_interpreter import SingleTreeCateInterpreter
@@ -207,11 +210,12 @@ class CausalInferenceModel:
 
     This class implements three complementary approaches:
 
-    **Approach 1 — IPTW + Doubly Robust GEE** (``analyze_treatment_effect``):
+        **Approach 1 — IPTW + Covariate-Adjusted GEE** (``analyze_treatment_effect``):
     - For continuous and binary outcomes (e.g., survey indices, binary flags)
     - Stabilized inverse probability weights (IPTW) for ATE or ATT
     - Generalized Estimating Equations (GEE) to account for clustering
-    - Optional outcome model covariate adjustment for doubly robust property
+        - Optional outcome model covariate adjustment for additional protection
+            against model misspecification
 
     **Approach 2 — IPTW + Cox Proportional Hazards** (``analyze_survival_effect``):
     - For time-to-event outcomes (e.g., employee retention, time to departure)
@@ -220,11 +224,13 @@ class CausalInferenceModel:
     - Restricted Mean Survival Time (RMST) for business-friendly interpretation
     - Use ``prepare_survival_data()`` to convert departure dates to survival format
 
-    **Approach 3 — Double Machine Learning** (``dml_estimate_treatment_effects``):
-    - Linear DML for ATE/ATT estimation with flexible ML nuisance models
-    - Causal Forest DML for individualized CATE estimation
-    - ATT derived from CATE by averaging over treated observations
-    - Uses the ``econml`` package
+        **Approach 3 — Double Machine Learning**
+        (``dml_cluster_robust_ate`` / ``dml_estimate_treatment_effects``):
+        - DoubleML PLR for cluster-robust ATE estimation with flexible nuisance
+            models
+        - Causal Forest DML for individualized CATE estimation
+        - ATT derived from CATE by averaging over treated observations
+        - Uses ``doubleml`` for ATE robustness checks and ``econml`` for CATE
 
     The estimand (ATE vs. ATT) is determined by the weight construction formula
     (IPTW) or by subsetting CATE predictions (DML), not by GEE or Cox itself.
@@ -791,7 +797,7 @@ class CausalInferenceModel:
     # Outcome model components
     # ==================================================================
 
-    def fit_doubly_robust_model(
+    def fit_iptw_outcome_model(
         self,
         data: pd.DataFrame,
         outcome_var: str,
@@ -802,13 +808,21 @@ class CausalInferenceModel:
         family: str = "gaussian"
     ) -> object:
         """
-        Fit doubly robust treatment effect model using weighted GEE.
-        
+        Fit IPTW-weighted outcome model using GEE with covariate adjustment.
+
         Estimates the treatment effect using inverse probability weighting
         combined with outcome model covariate adjustment in a GEE framework.
-        
-        The model is doubly robust: consistent estimation occurs if either the
-        propensity score model OR the outcome model is correctly specified.
+
+        Including covariates in both the propensity score model and the outcome
+        model provides additional protection against misspecification of either
+        model - a property sometimes called double robustness under linearity
+        (Lunceford & Davidian, 2004). This protection requires that at least
+        one of the two models is correctly specified.
+
+        Note: This is not the formal Augmented IPW (AIPW) estimator, which has
+        a specific augmentation term that provides the doubly robust property
+        in a more general sense. The covariate-adjusted IPTW approach used here
+        achieves the same consistency property under linear outcome models.
         
         Parameters
         ----------
@@ -823,7 +837,7 @@ class CausalInferenceModel:
         cluster_var : str
             Name of the clustering variable (e.g., manager ID)
         covariates : List[str], optional
-            Additional covariates to include in outcome model for adjusted estimation
+            Additional covariates to include in the outcome model
         family : str, default="gaussian"
             Distribution family for GEE: "gaussian" or "binomial"
         
@@ -921,7 +935,7 @@ class CausalInferenceModel:
         cluster_var : str, optional
             Clustering variable for robust standard errors.
         covariates : list of str, optional
-            Additional covariates for doubly robust estimation.
+            Additional covariates for outcome-model adjustment.
         alpha : float, default 0.05
             Significance level for PH test reporting.
         time_interaction : str, default "categorical"
@@ -1382,7 +1396,326 @@ class CausalInferenceModel:
             "n_events_control": int(control_events),
             "coefficients_df": coefficients_df,
         }
+    
+    
 
+    def _fit_standard_cox_model(
+        self,
+        data: pd.DataFrame,
+        time_var: str,
+        event_var: str,
+        treatment_var: str,
+        weight_col: str,
+        cluster_var: Optional[str] = None,
+        covariates: Optional[List[str]] = None,
+        alpha: float = 0.05,
+    ) -> Dict:
+        """
+        Fit a standard IPTW-weighted Cox proportional hazards model (no time
+        interaction terms).
+
+        Produces a single overall hazard ratio for the treatment effect under the
+        proportional-hazards assumption. If the PH assumption is violated, a
+        warning is printed recommending ``analyze_survival_effect()`` with
+        ``time_interaction='categorical'`` instead.
+
+        Parameters
+        ----------
+        data : pd.DataFrame
+            Data with time_var, event_var, treatment_var, weight_col, and
+            any covariates.
+        time_var : str
+            Name of the time column (days_observed).
+        event_var : str
+            Name of the event column (departed).
+        treatment_var : str
+            Binary treatment variable (1 = treated, 0 = control).
+        weight_col : str
+            IPTW weight column.
+        cluster_var : str, optional
+            Clustering variable for robust standard errors.
+        covariates : list of str, optional
+            Additional covariates for outcome-model adjustment.
+        alpha : float, default 0.05
+            Significance level for confidence intervals and PH test.
+
+        Returns
+        -------
+        dict
+            Results dictionary with:
+            - period_hrs         : single-row DataFrame with period="overall",
+                                   HR, CI, p-value.
+            - time_interaction   : None (sentinel for standard Cox).
+            - concordance        : float, concordance index.
+            - ph_test_results    : DataFrame of PH test results.
+            - ph_assumption_met  : bool, whether treatment passes PH test.
+            - survival_at_snapshots : DataFrame of KM survival probabilities
+                                     at 90, 180, 270, 365 days.
+            - kmf_treated        : fitted KaplanMeierFitter for treated group.
+            - kmf_control        : fitted KaplanMeierFitter for control group.
+            - cox_model          : fitted CoxPHFitter object.
+            - n_events_treated   : int.
+            - n_events_control   : int.
+            - coefficients_df    : DataFrame of all model coefficients.
+
+        Raises
+        ------
+        ValueError
+            If required columns are missing, insufficient events, or model
+            fitting fails.
+        """
+        # ------------------------------------------------------------------
+        # Validate inputs
+        # ------------------------------------------------------------------
+        required_cols = [time_var, event_var, treatment_var, weight_col]
+        missing_cols = [c for c in required_cols if c not in data.columns]
+        if missing_cols:
+            raise ValueError(f"Missing required columns: {missing_cols}")
+
+        treated_events = ((data[treatment_var] == 1) & (data[event_var] == 1)).sum()
+        control_events = ((data[treatment_var] == 0) & (data[event_var] == 1)).sum()
+
+        if treated_events < 5:
+            raise ValueError(
+                f"Insufficient events in treated group: {treated_events} < 5"
+            )
+        if control_events < 5:
+            raise ValueError(
+                f"Insufficient events in control group: {control_events} < 5"
+            )
+
+        print("\n" + "=" * 60)
+        print("COX PROPORTIONAL HAZARDS MODEL — STANDARD (NO TIME INTERACTION)")
+        print("=" * 60)
+        print(f"Model            : {treatment_var} (single overall HR)")
+
+        # ------------------------------------------------------------------
+        # Build formula variables — treatment + covariates only
+        # ------------------------------------------------------------------
+        formula_vars = [treatment_var]
+        if covariates:
+            formula_vars = formula_vars + [c for c in covariates if c not in formula_vars]
+
+        # ------------------------------------------------------------------
+        # Prepare data and fit
+        # ------------------------------------------------------------------
+        keep_cols = (
+            [time_var, event_var, weight_col]
+            + formula_vars
+            + ([cluster_var] if cluster_var and cluster_var in data.columns else [])
+        )
+        keep_cols = list(dict.fromkeys(keep_cols))
+        cox_data = data[keep_cols].copy().dropna()
+
+        if len(cox_data) < 20:
+            raise ValueError(
+                f"Insufficient data for Cox model after preprocessing: "
+                f"{len(cox_data)} rows"
+            )
+
+        cph = CoxPHFitter()
+        fit_kw = dict(
+            duration_col=time_var,
+            event_col=event_var,
+            weights_col=weight_col,
+        )
+        if cluster_var and cluster_var in data.columns:
+            fit_kw["robust"] = True
+            fit_kw["cluster_col"] = cluster_var
+
+        try:
+            cph.fit(cox_data, **fit_kw)
+        except Exception as e:
+            raise ValueError(f"Cox model fitting failed: {e}")
+
+        concordance = float(cph.concordance_index_)
+        print(f"\nModel fitted     : {len(cox_data):,} observations, "
+              f"{int(treated_events + control_events)} events")
+        print(f"Concordance      : {concordance:.3f}")
+
+        # ------------------------------------------------------------------
+        # PH test
+        # ------------------------------------------------------------------
+        ph_test_results = None
+        ph_assumption_met = None
+
+        print("\n--- Proportional Hazards Test ---")
+        print(
+            "NOTE: Standard Cox PH assumes proportional hazards.\n"
+            "      If treatment violates PH, consider using\n"
+            "      analyze_survival_effect(time_interaction='categorical')\n"
+            "      to model time-varying effects."
+        )
+
+        try:
+            from lifelines.statistics import proportional_hazard_test
+
+            ph_result = proportional_hazard_test(
+                cph, cox_data, time_transform="rank",
+            )
+
+            if ph_result.summary is not None and not ph_result.summary.empty:
+                ph_test_results = ph_result.summary.copy()
+                ph_test_results["note"] = ""
+
+                if treatment_var in ph_test_results.index.get_level_values(0):
+                    treat_p = float(
+                        ph_test_results.loc[treatment_var, "p"].iloc[0]
+                        if hasattr(
+                            ph_test_results.loc[treatment_var, "p"], "iloc"
+                        )
+                        else ph_test_results.loc[treatment_var, "p"]
+                    )
+                    ph_assumption_met = treat_p >= alpha
+                else:
+                    ph_assumption_met = True
+
+                print(
+                    ph_test_results[["test_statistic", "p", "note"]].to_string()
+                )
+
+                if ph_assumption_met is False:
+                    print(
+                        "\n  ⚠️  Treatment variable VIOLATES proportional "
+                        "hazards assumption.\n"
+                        "      The single HR may be misleading. Consider "
+                        "re-running with\n"
+                        "      analyze_survival_effect("
+                        "time_interaction='categorical')."
+                    )
+                else:
+                    print("\n  ✓ Proportional hazards assumption met for treatment.")
+            else:
+                print("PH test returned no results.")
+        except Exception as e:
+            print(f"⚠️  PH test could not be completed: {e}")
+
+        # ------------------------------------------------------------------
+        # Extract single overall hazard ratio
+        # ------------------------------------------------------------------
+        print("\n--- Overall Hazard Ratio ---")
+
+        from scipy import stats as scipy_stats
+        z_crit = scipy_stats.norm.ppf(1 - alpha / 2)
+
+        beta_treat = float(cph.params_[treatment_var])
+        se_treat = float(cph.standard_errors_[treatment_var])
+        hr = np.exp(beta_treat)
+        hr_lower = np.exp(beta_treat - z_crit * se_treat)
+        hr_upper = np.exp(beta_treat + z_crit * se_treat)
+        z_stat = beta_treat / se_treat
+        p_val = 2 * (1 - scipy_stats.norm.cdf(abs(z_stat)))
+
+        period_hrs = pd.DataFrame([{
+            "period": "overall",
+            "timepoint_days": None,
+            "hazard_ratio": round(hr, 4),
+            "hr_ci_lower": round(hr_lower, 4),
+            "hr_ci_upper": round(hr_upper, 4),
+            "p_value": round(p_val, 4),
+            "log_hr": round(beta_treat, 4),
+            "se_log_hr": round(se_treat, 4),
+            "note": "single overall HR (no time interaction)",
+        }])
+        print(period_hrs.to_string(index=False))
+
+        # ------------------------------------------------------------------
+        # Build coefficients DataFrame
+        # ------------------------------------------------------------------
+        coefficients_df = pd.DataFrame({
+            "Parameter": cph.params_.index.tolist(),
+            "Estimate": cph.params_.values.tolist(),
+            "Std_Error": cph.standard_errors_.values.tolist(),
+            "CI_Lower": cph.confidence_intervals_.iloc[:, 0].values.tolist(),
+            "CI_Upper": cph.confidence_intervals_.iloc[:, 1].values.tolist(),
+            "P_Value_Raw": cph.summary["p"].values.tolist(),
+            "Alpha": [alpha] * len(cph.params_),
+        })
+
+        # ------------------------------------------------------------------
+        # Fit IPTW-weighted Kaplan-Meier curves
+        # ------------------------------------------------------------------
+        print("\nFitting IPTW-weighted Kaplan-Meier survival curves...")
+
+        treated_data = data[data[treatment_var] == 1]
+        control_data = data[data[treatment_var] == 0]
+
+        kmf_treated = KaplanMeierFitter()
+        kmf_control = KaplanMeierFitter()
+
+        try:
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message=".*weights are not integers.*",
+                    category=StatisticalWarning,
+                )
+                kmf_treated.fit(
+                    durations=treated_data[time_var],
+                    event_observed=treated_data[event_var],
+                    weights=treated_data[weight_col],
+                    label="Treated",
+                )
+                kmf_control.fit(
+                    durations=control_data[time_var],
+                    event_observed=control_data[event_var],
+                    weights=control_data[weight_col],
+                    label="Control",
+                )
+        except Exception as e:
+            raise ValueError(f"Kaplan-Meier fitting failed: {e}")
+
+        # ------------------------------------------------------------------
+        # Survival snapshots
+        # ------------------------------------------------------------------
+        snapshot_days = [90, 180, 270, 365]
+        survival_snapshots = []
+
+        for days in snapshot_days:
+            try:
+                s_t = float(
+                    kmf_treated.survival_function_at_times(days).iloc[0]
+                )
+                s_c = float(
+                    kmf_control.survival_function_at_times(days).iloc[0]
+                )
+                survival_snapshots.append({
+                    "timepoint_days": days,
+                    "timepoint_label": (
+                        f"{days // 30}mo" if days % 30 == 0 else f"{days}d"
+                    ),
+                    "survival_treated": s_t,
+                    "survival_control": s_c,
+                    "survival_diff": s_t - s_c,
+                })
+            except Exception:
+                survival_snapshots.append({
+                    "timepoint_days": days,
+                    "timepoint_label": (
+                        f"{days // 30}mo" if days % 30 == 0 else f"{days}d"
+                    ),
+                    "survival_treated": np.nan,
+                    "survival_control": np.nan,
+                    "survival_diff": np.nan,
+                })
+
+        survival_at_snapshots = pd.DataFrame(survival_snapshots)
+        print("=" * 60)
+
+        return {
+            "period_hrs": period_hrs,
+            "time_interaction": None,
+            "concordance": concordance,
+            "ph_test_results": ph_test_results,
+            "ph_assumption_met": ph_assumption_met,
+            "survival_at_snapshots": survival_at_snapshots,
+            "kmf_treated": kmf_treated,
+            "kmf_control": kmf_control,
+            "cox_model": cph,
+            "n_events_treated": int(treated_events),
+            "n_events_control": int(control_events),
+            "coefficients_df": coefficients_df,
+        }
     
     # ==================================================================
     # Visualization
@@ -2160,14 +2493,15 @@ class CausalInferenceModel:
         plot_weights: bool = True
     ) -> Dict:
         """
-        Complete analysis pipeline: IPTW propensity weights → doubly robust outcome model.
+        Complete analysis pipeline: IPTW propensity weights -> weighted GEE
+        outcome model with covariate adjustment.
         
         Comprehensive causal inference analysis implementing:
         1. Data preparation and covariate encoding
         2. Propensity score estimation with IPTW computation (ATE or ATT)
         3. Propensity score overlap visualization
         4. Weight diagnostics, distribution visualization, and balance assessment
-        5. Doubly robust outcome modeling via weighted GEE
+        5. IPTW-weighted outcome modeling via GEE with covariate adjustment
         6. Effect size metrics (IPTW-weighted Cohen's d, percent change)
         7. Optional export to Excel workbook
 
@@ -2291,7 +2625,7 @@ class CausalInferenceModel:
         baseline_var    = _iptw["baseline_var"]
 
         # ------------------------------------------------------------------
-        # Step 3: Fit doubly robust outcome model
+        # Step 3: Fit IPTW-weighted outcome model with covariate adjustment
         # ------------------------------------------------------------------
         # Auto-detect binary outcomes for appropriate GEE family
         outcome_values = df[outcome_var].dropna().unique()
@@ -2310,7 +2644,7 @@ class CausalInferenceModel:
                 null_vars = null_counts[null_counts > 0].to_dict()
                 raise ValueError(f"Missing values in model variables: {null_vars}")
             
-            gee_res = self.fit_doubly_robust_model(
+            gee_res = self.fit_iptw_outcome_model(
                 df,
                 outcome_var,
                 treatment_var,
@@ -2460,6 +2794,13 @@ class CausalInferenceModel:
         alpha: float = 0.05,
     ) -> Dict:
         """
+        .. note::
+            For cluster-robust ATE estimation, prefer
+            ``dml_cluster_robust_ate()``, which uses the ``doubleml`` package
+            with native cluster support. This method remains available for
+            CATE estimation via Causal Forest, which ``doubleml`` does not
+            offer.
+
         Estimate ATE, ATT, and/or CATE using Double Machine Learning (DML).
 
         Implements two complementary DML estimators from the ``econml`` package:
@@ -2519,9 +2860,10 @@ class CausalInferenceModel:
             Which DML estimators to run: ``"ATE"`` (linear DML only),
             ``"CATE"`` (Causal Forest only), or ``"both"``.
         cluster_var : str, optional
-            Name of clustering variable. Stored in results metadata but **not**
-            used by DML (which does not natively handle clustering). For
-            cluster-robust inference, use ``analyze_treatment_effect()``.
+            Name of clustering variable. Stored in results metadata for the
+            econml workflow; not used directly by this estimator for inference.
+            For cluster-robust ATE estimation, prefer
+            ``dml_cluster_robust_ate()``.
         random_state : int, default=42
             Random seed for reproducibility.
         test_size : float, default=0.2
@@ -2593,10 +2935,9 @@ class CausalInferenceModel:
 
         Notes
         -----
-        - DML does **not** natively account for clustering. If your data has a
-          hierarchical structure (e.g. managers nested in teams), the standard
-          errors from DML may be anti-conservative. Use
-          ``analyze_treatment_effect()`` for cluster-robust inference.
+                - This econml-based workflow is best treated as the CATE exploration
+                    path. For like-for-like cluster-robust ATE comparison against
+                    IPTW + GEE, use ``dml_cluster_robust_ate()``.
         - ATT is derived by averaging CATE estimates over treated observations:
           E[τ(X) | T=1]. This is valid under unconfoundedness but does not use
           a dedicated ATT estimator. When DML is fit with X=None (homogeneous
@@ -3021,6 +3362,185 @@ class CausalInferenceModel:
             "cluster_var": cluster_var,
         }
 
+    def dml_cluster_robust_ate(
+        self,
+        data: pd.DataFrame,
+        outcome_col: str,
+        treatment_col: str,
+        categorical_vars: Optional[List[str]] = None,
+        binary_vars: Optional[List[str]] = None,
+        continuous_vars: Optional[List[str]] = None,
+        cluster_var: Optional[str] = None,
+        n_estimators: int = 200,
+        max_depth: int = 5,
+        cv: int = 5,
+        random_state: int = 42,
+        alpha: float = 0.05,
+    ) -> Dict:
+        """
+        Estimate ATE via Partially Linear Regression (PLR) Double Machine
+        Learning with native cluster-robust inference.
+
+        Uses the ``doubleml`` package (Bach et al., 2022), which provides
+        cluster-aware cross-fitting and cluster-robust standard errors
+        when ``cluster_cols`` is specified in ``DoubleMLData``.
+
+        This method is intended as a robustness check against the primary
+        IPTW + GEE estimates from ``analyze_treatment_effect()``. When both
+        methods account for clustering and produce similar ATEs, confidence
+        in the causal estimate increases.
+
+        Parameters
+        ----------
+        data : pd.DataFrame
+            Dataset containing outcome, treatment, and covariate variables.
+        outcome_col : str
+            Name of the outcome column (Y).
+        treatment_col : str
+            Name of the binary treatment column (T).
+        categorical_vars : list of str, optional
+            Categorical covariate names (will be one-hot encoded).
+        binary_vars : list of str, optional
+            Binary covariate names.
+        continuous_vars : list of str, optional
+            Continuous covariate names.
+        cluster_var : str, optional
+            Name of the clustering variable (e.g., 'team_id'). When provided,
+            DoubleML uses cluster-aware cross-fitting and cluster-robust
+            score-based inference.
+        n_estimators : int, default=200
+            Number of trees for Random Forest nuisance models.
+        max_depth : int, default=5
+            Max tree depth for nuisance models.
+        cv : int, default=5
+            Number of cross-fitting folds.
+        random_state : int, default=42
+            Random seed.
+        alpha : float, default=0.05
+            Significance level.
+
+        Returns
+        -------
+        dict
+            Dictionary with keys compatible with build_summary_table().
+
+        References
+        ----------
+        Bach P, Chernozhukov V, Kurz MS, Spindler M (2022). DoubleML -
+        An Object-Oriented Implementation of Double Machine Learning in
+        Python. Journal of Machine Learning Research, 23(53):1-6.
+        """
+        df = data.copy()
+
+        cat_vars = categorical_vars or []
+        bin_vars = binary_vars or []
+        cont_vars = continuous_vars or []
+
+        if cat_vars:
+            df = pd.get_dummies(df, columns=cat_vars, drop_first=True)
+
+        dummy_cols = [
+            column for column in df.columns
+            if any(column.startswith(var + "_") for var in cat_vars)
+        ]
+        x_cols = dummy_cols + bin_vars + cont_vars
+
+        rename_map = {column: self._clean_column_name(column) for column in df.columns}
+        df.rename(columns=rename_map, inplace=True)
+        outcome_col = self._clean_column_name(outcome_col)
+        treatment_col = self._clean_column_name(treatment_col)
+        x_cols = [self._clean_column_name(column) for column in x_cols]
+        if cluster_var:
+            cluster_var = self._clean_column_name(cluster_var)
+
+        all_cols = list(set([outcome_col, treatment_col] + x_cols + ([cluster_var] if cluster_var else [])))
+        df = df[all_cols].dropna().copy()
+
+        if len(df) < 20:
+            raise ValueError(
+                f"Insufficient data after removing missing values: {len(df)} rows"
+            )
+
+        dml_data_kwargs = {
+            "data": df,
+            "y_col": outcome_col,
+            "d_cols": treatment_col,
+            "x_cols": x_cols,
+        }
+        if cluster_var:
+            dml_data_kwargs["cluster_cols"] = cluster_var
+        dml_data = DoubleMLData(**dml_data_kwargs)
+
+        ml_l = RandomForestRegressor(
+            n_estimators=n_estimators,
+            max_depth=max_depth,
+            random_state=random_state,
+        )
+        ml_m = RandomForestClassifier(
+            n_estimators=n_estimators,
+            max_depth=max_depth,
+            random_state=random_state,
+        )
+
+        dml_plr = DoubleMLPLR(
+            dml_data,
+            ml_l=ml_l,
+            ml_m=ml_m,
+            n_folds=cv,
+        )
+        dml_plr.fit()
+
+        ate = float(dml_plr.coef[0])
+        se = float(dml_plr.se[0])
+        ci = dml_plr.confint(level=1 - alpha)
+        ci_lower = float(ci.iloc[0, 0])
+        ci_upper = float(ci.iloc[0, 1])
+        p_value = float(dml_plr.pval[0])
+        significant = p_value < alpha
+
+        n_clusters = df[cluster_var].nunique() if cluster_var else None
+
+        cluster_note = f", {n_clusters} clusters" if n_clusters else ""
+        print(f"\n  DoubleML PLR - Cluster-Robust ATE Estimation")
+        print(f"  {'=' * 50}")
+        print(f"  ATE = {ate:.4f} (SE = {se:.4f}{cluster_note})")
+        print(f"  {int((1-alpha)*100)}% CI: [{ci_lower:.4f}, {ci_upper:.4f}]")
+        print(f"  p-value = {p_value:.4f} {self._significance_stars(p_value)}")
+        print(f"  n = {len(df)}")
+        if cluster_var:
+            print(f"  Inference: cluster-robust (cluster_cols = '{cluster_var}')")
+        print(f"  {'=' * 50}")
+
+        return {
+            "effect": ate,
+            "estimand": "ATE",
+            "se": se,
+            "ci_lower": ci_lower,
+            "ci_upper": ci_upper,
+            "p_value": p_value,
+            "significant": significant,
+            "alpha": alpha,
+            "cohens_d": None,
+            "pct_change": None,
+            "mean_treatment": df[df[treatment_col] == 1][outcome_col].mean(),
+            "mean_control": df[df[treatment_col] == 0][outcome_col].mean(),
+            "outcome_type": "continuous",
+            "n_obs": len(df),
+            "n_clusters": n_clusters,
+            "coefficients_df": pd.DataFrame({
+                "Parameter": [treatment_col],
+                "Estimate": [ate],
+                "Std_Error": [se],
+                "CI_Lower": [ci_lower],
+                "CI_Upper": [ci_upper],
+                "P_Value_Raw": [p_value],
+                "Alpha": [alpha],
+            }),
+            "weight_diagnostics": {"n_observations": len(df)},
+            "doubleml_model": dml_plr,
+            "summary": dml_plr.summary,
+        }
+
     def dml_estimate_treatment_effects_help(self):
         """
         Print detailed documentation for ``dml_estimate_treatment_effects``.
@@ -3031,6 +3551,10 @@ class CausalInferenceModel:
         help_text = """
     Double Machine Learning (DML) for ATE, ATT, and CATE Estimation
     ================================================================
+
+    For cluster-robust ATE estimation, prefer
+    ``CausalInferenceModel.dml_cluster_robust_ate()``. The method documented
+    below remains the primary path for CATE estimation via ``econml``.
 
     This method implements Double Machine Learning (DML) to estimate the
     Average Treatment Effect (ATE), Average Treatment Effect on the Treated
@@ -3057,7 +3581,8 @@ class CausalInferenceModel:
     - discrete_treatment (bool): Whether treatment is discrete. Auto-detected if None.
     - estimand (str): "ATE", "ATT", or "both". Default: "ATE".
     - estimate (str): "ATE" (linear DML), "CATE" (Causal Forest), or "both".
-    - cluster_var (str): Clustering variable (stored for metadata; not used by DML).
+        - cluster_var (str): Clustering variable (stored for metadata in this econml
+            workflow; for cluster-robust ATE use dml_cluster_robust_ate).
     - random_state (int): Random seed. Default: 42.
     - test_size (float): Fraction held out for CATE evaluation. Default: 0.2.
     - n_estimators (int): Number of Causal Forest trees. Default: 500.
@@ -3521,6 +4046,322 @@ class CausalInferenceModel:
             "concordance": concordance,
             "ph_test_results": ph_test_results,          # DataFrame with PH test + notes
             "ph_assumption_met": ph_assumption_met,      # Boolean for treatment variable
+            "kmf_treated": cox_results.get("kmf_treated"),
+            "kmf_control": cox_results.get("kmf_control"),
+            "cox_model": cox_results.get("cox_model"),
+            "survival_at_snapshots": survival_snapshots,
+            "n_events_treated": cox_results.get("n_events_treated"),
+            "n_events_control": cox_results.get("n_events_control"),
+            "n_treated": int(df[treatment_var].sum()),
+            "n_control": int((df[treatment_var] == 0).sum()),
+
+            # --- Variable-name metadata ---
+            "treatment_var": treatment_var,
+            "time_var": time_var,
+            "event_var": event_var,
+        }
+    
+
+    def analyze_standard_survival_effect(
+        self,
+        data: pd.DataFrame,
+        time_var: str,
+        event_var: str,
+        treatment_var: str,
+        categorical_vars: List[str],
+        binary_vars: List[str],
+        continuous_vars: List[str],
+        cluster_var: str,
+        estimand: str = "ATE",
+        project_path: Optional[str] = None,
+        trim_quantile: float = 0.99,
+        analysis_name: Optional[str] = None,
+        alpha: float = 0.05,
+        plot_propensity: bool = True,
+        plot_weights: bool = True,
+    ) -> Dict:
+        """
+        Complete survival analysis pipeline: IPTW → standard Cox PH model.
+
+        Simpler alternative to ``analyze_survival_effect()`` that fits a single
+        overall hazard ratio under the proportional-hazards assumption (no time
+        interaction terms, no person-period expansion).
+
+        Use this when:
+        - You want a quick, parsimonious estimate
+        - PH is expected to hold (e.g., short study window, stable effect)
+        - You want a baseline comparison before the time-interaction model
+
+        If PH is violated, the method prints a warning recommending the
+        time-interaction variant.
+
+        Parameters
+        ----------
+        data : pd.DataFrame
+            Dataset with time_var, event_var, treatment, and covariates.
+        time_var : str
+            Name of time column (days from T=0 to event/censoring).
+        event_var : str
+            Name of event indicator column (1=event, 0=censored).
+        treatment_var : str
+            Name of binary treatment variable.
+        categorical_vars : List[str]
+            Categorical covariate names (will be one-hot encoded).
+        binary_vars : List[str]
+            Binary covariate names.
+        continuous_vars : List[str]
+            Continuous covariate names.
+        cluster_var : str
+            Clustering variable for robust standard errors.
+        estimand : str, default="ATE"
+            Target estimand: "ATE" or "ATT".
+        project_path : str, optional
+            Path to save results Excel file.
+        trim_quantile : float, default=0.99
+            Quantile for weight trimming.
+        analysis_name : str, optional
+            Analysis identifier for file naming.
+        alpha : float, default=0.05
+            Significance level for confidence intervals.
+        plot_propensity : bool, default=True
+            If True, generates propensity score overlap plot.
+        plot_weights : bool, default=True
+            If True, generates IPTW weight distribution plot.
+
+        Returns
+        -------
+        dict
+            Same structure as ``analyze_survival_effect()`` for compatibility
+            with ``build_survival_summary_table()``,
+            ``compute_evalues_from_results()``, ``compute_rmst_difference()``,
+            and ``plot_survival_curves()``.
+
+            Key differences from the time-interaction variant:
+            - ``period_hrs`` contains a single row with ``period="overall"``
+            - ``time_interaction`` is ``None``
+            - ``effect`` is the single overall hazard ratio
+
+        Raises
+        ------
+        ValueError
+            If data preparation, model fitting, or validation fails.
+
+        See Also
+        --------
+        analyze_survival_effect : Time-interaction Cox model (recommended
+            when PH may be violated).
+        """
+        # Validate estimand
+        estimand = estimand.upper()
+        if estimand not in ["ATE", "ATT"]:
+            raise ValueError(f"estimand must be 'ATE' or 'ATT', got '{estimand}'")
+
+        # ------------------------------------------------------------------
+        # Steps 0–2: Data prep, propensity weighting, diagnostics
+        # ------------------------------------------------------------------
+        _iptw = self._prepare_iptw_data(
+            data=data,
+            treatment_var=treatment_var,
+            cluster_var=cluster_var,
+            categorical_vars=categorical_vars,
+            binary_vars=binary_vars,
+            continuous_vars=continuous_vars,
+            estimand=estimand,
+            trim_quantile=trim_quantile,
+            plot_propensity=plot_propensity,
+            plot_weights=plot_weights,
+            time_var=time_var,
+            event_var=event_var,
+            preserve_strata_backups=False,
+            analysis_label=f"Standard Survival Analysis ({estimand})",
+        )
+        df             = _iptw["df"]
+        ps_model       = _iptw["ps_model"]
+        weight_stats   = _iptw["weight_stats"]
+        balance_df     = _iptw["balance_df"]
+        ps_overlap_fig = _iptw["ps_overlap_fig"]
+        weight_dist_fig = _iptw["weight_dist_fig"]
+        covariates     = _iptw["covariates"]
+        treatment_var  = _iptw["treatment_var"]
+        cluster_var    = _iptw["cluster_var"]
+        time_var       = _iptw["time_var"]
+        event_var      = _iptw["event_var"]
+
+        # ------------------------------------------------------------------
+        # STEP 3: Fit standard Cox PH model
+        # ------------------------------------------------------------------
+        try:
+            cox_results = self._fit_standard_cox_model(
+                data=df,
+                time_var=time_var,
+                event_var=event_var,
+                treatment_var=treatment_var,
+                weight_col="iptw",
+                cluster_var=cluster_var,
+                covariates=covariates,
+                alpha=alpha,
+            )
+        except Exception as e:
+            raise ValueError(f"Error fitting standard Cox model: {str(e)}")
+
+        # ------------------------------------------------------------------
+        # STEP 4: Extract results
+        # ------------------------------------------------------------------
+        period_hrs = cox_results["period_hrs"]
+        concordance = cox_results["concordance"]
+        ph_test_results = cox_results.get("ph_test_results")
+        ph_assumption_met = cox_results.get("ph_assumption_met")
+
+        display_row = period_hrs.iloc[0]
+        hazard_ratio = display_row["hazard_ratio"]
+        hr_ci_lower = display_row["hr_ci_lower"]
+        hr_ci_upper = display_row["hr_ci_upper"]
+        hr_pvalue = display_row["p_value"]
+
+        significant = hr_pvalue < alpha
+        stars = self._significance_stars(hr_pvalue)
+        ci_pct = int((1 - alpha) * 100)
+
+        # ------------------------------------------------------------------
+        # Print summary
+        # ------------------------------------------------------------------
+        print(f"\n{'=' * 60}")
+        print(f"SURVIVAL ANALYSIS RESULTS — STANDARD COX PH ({estimand})")
+        print(f"{'=' * 60}")
+        print(f"  Model type:        Standard Cox PH (single overall HR)")
+        print()
+        print(f"  Overall Hazard Ratio")
+        print(f"  Hazard Ratio:      {hazard_ratio:.3f} "
+              f"({ci_pct}% CI: [{hr_ci_lower:.3f}, {hr_ci_upper:.3f}])")
+        print(f"  P-value:           {hr_pvalue:.4f} {stars}")
+        print(f"  Concordance:       {concordance:.3f}")
+        print()
+
+        if ph_test_results is not None:
+            print("  Proportional Hazards Test:")
+            if ph_assumption_met is False:
+                print("    ⚠️  Treatment PH violation detected.")
+                print("    Consider using analyze_survival_effect("
+                      "time_interaction='categorical')")
+            elif ph_assumption_met is True:
+                print("    ✓  No treatment PH violation detected")
+            print("    See ph_test_results for full details.")
+        print()
+
+        print("  Note: Standard Cox PH assumes a constant hazard ratio over time.")
+        print("  If PH is violated, use analyze_survival_effect() with")
+        print("  time_interaction='categorical' for time-varying effects.")
+        print("  IPTW-weighted KM curves provide descriptive snapshots;")
+        print("  all inference comes from Cox model with robust sandwich SEs.")
+        print(f"{'=' * 60}")
+
+        # --- Survival probabilities at 365 days ---
+        survival_snapshots = cox_results.get(
+            "survival_at_snapshots", pd.DataFrame()
+        )
+        snap_365 = survival_snapshots[
+            survival_snapshots["timepoint_days"] == 365
+        ]
+
+        if not snap_365.empty:
+            mean_treatment = float(snap_365["survival_treated"].iloc[0])
+            mean_control = float(snap_365["survival_control"].iloc[0])
+        else:
+            mean_treatment = float(
+                1 - df[df[treatment_var] == 1][event_var].mean()
+            )
+            mean_control = float(
+                1 - df[df[treatment_var] == 0][event_var].mean()
+            )
+
+        # --- Compatibility coefficients_df ---
+        log_hr = np.log(hazard_ratio)
+        log_hr_se = (
+            (np.log(hr_ci_upper) - np.log(hr_ci_lower)) / (2 * 1.96)
+        )
+
+        coefficients_df = pd.DataFrame({
+            "Parameter": [f"{treatment_var}_overall_HR"],
+            "Estimate": [log_hr],
+            "Std_Error": [log_hr_se],
+            "CI_Lower": [np.log(hr_ci_lower)],
+            "CI_Upper": [np.log(hr_ci_upper)],
+            "P_Value_Raw": [hr_pvalue],
+            "Alpha": [alpha],
+        })
+
+        ps_summary_df = self._build_ps_summary_df(ps_model)
+
+        # ------------------------------------------------------------------
+        # STEP 5: Export (optional)
+        # ------------------------------------------------------------------
+        if project_path and analysis_name:
+            try:
+                export_path = (
+                    f"{project_path}/"
+                    f"{estimand.lower()}_iptw_cox_standard_{analysis_name}.xlsx"
+                )
+                with pd.ExcelWriter(export_path, engine="openpyxl") as writer:
+                    balance_df.to_excel(
+                        writer, sheet_name="Covariate_Balance", index=False
+                    )
+                    pd.DataFrame([weight_stats]).to_excel(
+                        writer, sheet_name="Weight_Diagnostics", index=False
+                    )
+                    period_hrs.to_excel(
+                        writer, sheet_name="Overall_HR", index=False
+                    )
+                    coefficients_df.to_excel(
+                        writer, sheet_name=f"{estimand}_Cox_Summary", index=False
+                    )
+                    ps_summary_df.to_excel(
+                        writer, sheet_name="Propensity_Model", index=False
+                    )
+                    if not survival_snapshots.empty:
+                        survival_snapshots.to_excel(
+                            writer, sheet_name="Survival_Snapshots", index=False
+                        )
+                    if ph_test_results is not None:
+                        ph_test_results.to_excel(
+                            writer, sheet_name="PH_Test_Results", index=False
+                        )
+                print(f"  Results saved to {export_path}")
+            except Exception as e:
+                print(f"  Warning: Could not export results to Excel: {e}")
+
+        # ------------------------------------------------------------------
+        # STEP 6: Return results dict
+        # ------------------------------------------------------------------
+        return {
+            # --- Shared keys (build_summary_table / compute_evalues compat) ---
+            "effect": hazard_ratio,
+            "estimand": estimand,
+            "ci_lower": hr_ci_lower,
+            "ci_upper": hr_ci_upper,
+            "p_value": hr_pvalue,
+            "significant": significant,
+            "alpha": alpha,
+            "cohens_d": None,
+            "pct_change": None,
+            "mean_treatment": mean_treatment,
+            "mean_control": mean_control,
+            "outcome_type": "survival",
+            "coefficients_df": coefficients_df,
+            "full_coefficients_df": cox_results.get("coefficients_df"),
+            "ps_model": ps_model,
+            "ps_summary_df": ps_summary_df,
+            "balance_df": balance_df,
+            "weight_diagnostics": weight_stats,
+            "ps_overlap_fig": ps_overlap_fig,
+            "weight_dist_fig": weight_dist_fig,
+            "weighted_df": df,
+
+            # --- Survival-specific keys ---
+            "period_hrs": period_hrs,
+            "time_interaction": None,
+            "concordance": concordance,
+            "ph_test_results": ph_test_results,
+            "ph_assumption_met": ph_assumption_met,
             "kmf_treated": cox_results.get("kmf_treated"),
             "kmf_control": cox_results.get("kmf_control"),
             "cox_model": cox_results.get("cox_model"),
@@ -4125,7 +4966,7 @@ class CausalInferenceModel:
             p_clip = np.append(probs[mask], probs[mask][-1] if mask.any() else 1.0)
 
             # Trapezoidal integration
-            rmst = np.trapz(p_clip, t_clip)
+            rmst = np.trapezoid(p_clip, t_clip)
             return float(rmst)
 
         rmst_treated = _rmst_from_kmf(kmf_treated, time_horizon)
@@ -4450,7 +5291,7 @@ class CausalInferenceModel:
         summary_df["Correction_Method"] = correction_method if len(raw_pvals) > 1 else "none"
 
         # --- Print formatted table ---
-        display_title = title or "IPTW + Cox Time Interaction: Survival Analysis Summary"
+        display_title = title or "IPTW + Cox: Survival Analysis Summary"
         print(f"\n{'=' * 80}")
         print(f"  {display_title}")
         print(f"{'=' * 80}")
@@ -4510,7 +5351,7 @@ class CausalInferenceModel:
         print("  Significance: *** p<0.001, ** p<0.01, * p<0.05")
         print(f"  Correction: {actual_correction} across {len(rows)} outcome{'s' if len(rows) != 1 else ''}")
         print("  HR < 1 = lower hazard of departure (training is protective)")
-        print("  Time interaction models allow treatment effect to vary over time")
+        #print("  Time interaction models allow treatment effect to vary over time")
         print()
 
         # --- Save if requested ---
