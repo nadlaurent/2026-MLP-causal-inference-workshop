@@ -17,6 +17,8 @@ Usage:
     cd.help()
 """
 
+from typing import List, Optional
+
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -1247,9 +1249,17 @@ class CausalDiagnostics:
     # GROUP B — OVERLAP / COMMON-SUPPORT DIAGNOSTICS
     # ============================================================================
 
-    def check_covariate_overlap(self, data, treatment_var, categorical_vars=None,
-                                binary_vars=None, continuous_vars=None,
-                                baseline_vars=None, _show_guide=True, _quiet=False):
+    def check_covariate_overlap(
+        self,
+        data,
+        treatment_var,
+        categorical_vars: Optional[List[str]] = None,
+        binary_vars: Optional[List[str]] = None,
+        continuous_vars: Optional[List[str]] = None,
+        baseline_vars=None,
+        _show_guide=True,
+        _quiet=False,
+    ):
         """
         Check covariate overlap between treatment and control groups BEFORE analysis.
 
@@ -1268,8 +1278,11 @@ class CausalDiagnostics:
         treatment_var : str
             Name of treatment variable (1=treated, 0=control).
         categorical_vars : list, optional
+            Omitted or ``None`` means no categorical covariates.
         binary_vars : list, optional
+            Omitted or ``None`` means no binary covariates.
         continuous_vars : list, optional
+            Omitted or ``None`` means no continuous covariates.
         baseline_vars : list, optional
             Baseline outcome variables (e.g., ['growth_2024']).
         _show_guide : bool, default True
@@ -1291,6 +1304,10 @@ class CausalDiagnostics:
         T_series, n_treated, n_control = self._validate_binary_treatment(data, treatment_var)
         T = T_series.values
         thresh = self._get_overlap_thresholds()
+
+        categorical_vars = list(categorical_vars) if categorical_vars else []
+        binary_vars = list(binary_vars) if binary_vars else []
+        continuous_vars = list(continuous_vars) if continuous_vars else []
 
         _print("\n" + "=" * 80)
         _print("COVARIATE OVERLAP DIAGNOSTIC")
@@ -1395,9 +1412,15 @@ class CausalDiagnostics:
 
     # ------------------------------------------------------------------------
 
-    def prepare_adjustment_set_for_overlap(self, data, outcome_var, baseline_vars,
-                                        categorical_vars, binary_vars,
-                                        continuous_vars):
+    def prepare_adjustment_set_for_overlap(
+        self,
+        data,
+        outcome_var,
+        baseline_vars,
+        categorical_vars: Optional[List[str]] = None,
+        binary_vars: Optional[List[str]] = None,
+        continuous_vars: Optional[List[str]] = None,
+    ):
         """
         Prepare the full adjustment set including baseline variables.
 
@@ -1410,7 +1433,8 @@ class CausalDiagnostics:
             e.g. 'growth_2025'
         baseline_vars : dict
             {outcome: baseline} mapping.
-        categorical_vars, binary_vars, continuous_vars : list
+        categorical_vars, binary_vars, continuous_vars : list, optional
+            Each may be omitted or ``None``; defaults to no covariates of that type.
 
         Returns
         -------
@@ -1729,15 +1753,28 @@ class CausalDiagnostics:
         return recommended_estimand, next_step
 
     # ------------------------------------------------------------------------
-    def run_overlap_diagnostics(self, data, treatment_var, outcome_vars,
-                            baseline_vars, categorical_vars, binary_vars,
-                            continuous_vars):
+    def run_overlap_diagnostics(
+        self,
+        data,
+        treatment_var,
+        outcome_vars,
+        baseline_vars,
+        categorical_vars: Optional[List[str]] = None,
+        binary_vars: Optional[List[str]] = None,
+        continuous_vars: Optional[List[str]] = None,
+    ):
         """
         Run Step 2: Overlap / Common-Support Diagnostics for each outcome.
 
         Loops over outcome_vars, prepares per-outcome adjustment sets
         (including baseline), runs check_covariate_overlap, and recommends
         ATT vs ATE based on directional overlap metrics.
+
+        Parameters
+        ----------
+        categorical_vars, binary_vars, continuous_vars : list, optional
+            Covariate names by type. Each may be omitted or ``None``; defaults to
+            no covariates of that type.
 
         Returns
         -------
@@ -2411,15 +2448,18 @@ class CausalDiagnostics:
         Returns dict with metrics, recommendations, propensity scores.
 
         5. prepare_adjustment_set_for_overlap(data, outcome_var, baseline_vars,
-                                            categorical_vars, binary_vars,
-                                            continuous_vars)
+                                            categorical_vars=None, binary_vars=None,
+                                            continuous_vars=None)
         Build per-outcome adjustment sets, separating baseline variables.
+        Covariate lists are optional (omit or None for a type you do not use).
         Returns (cat_list, bin_list, cont_list, baseline_list).
 
         6. run_overlap_diagnostics(data, treatment_var, outcome_vars, baseline_vars,
-                                categorical_vars, binary_vars, continuous_vars)
+                                categorical_vars=None, binary_vars=None,
+                                continuous_vars=None)
         Loop over outcomes, run check_covariate_overlap for each, and
-        recommend ATT vs ATE estimand. Returns dict keyed by outcome + 'summary'.
+        recommend ATT vs ATE estimand. Covariate lists are optional.
+        Returns dict keyed by outcome + 'summary'.
 
         ────────────────────────────────────────────────────────────────────────────────
         GROUP C: POST-ESTIMATION BALANCE
@@ -2455,7 +2495,8 @@ class CausalDiagnostics:
         # Step 2 — Overlap / common support
         overlap = cd.run_overlap_diagnostics(
             df, 'T', outcome_vars, baseline_vars,
-            categorical_vars, binary_vars, continuous_vars)
+            categorical_vars=categorical_vars, binary_vars=binary_vars,
+            continuous_vars=continuous_vars)
         cd.save_overlap_diagnostics_summary(overlap, 'overlap_report.txt')
 
         # Step 3 — After IPW / matching

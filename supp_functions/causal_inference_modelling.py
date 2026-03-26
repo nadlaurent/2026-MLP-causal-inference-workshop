@@ -2020,9 +2020,9 @@ class CausalInferenceModel:
         data: pd.DataFrame,
         treatment_var: str,
         cluster_var: str,
-        categorical_vars: List[str],
-        binary_vars: List[str],
-        continuous_vars: List[str],
+        categorical_vars: Optional[List[str]] = None,
+        binary_vars: Optional[List[str]] = None,
+        continuous_vars: Optional[List[str]] = None,
         estimand: str = "ATE",
         trim_quantile: float = 0.01,
         plot_propensity: bool = True,
@@ -2053,8 +2053,9 @@ class CausalInferenceModel:
             Raw input data.
         treatment_var, cluster_var : str
             Treatment indicator and clustering column (original names).
-        categorical_vars, binary_vars, continuous_vars : list of str
-            Covariate lists (original names).
+        categorical_vars, binary_vars, continuous_vars : list of str, optional
+            Covariate lists (original names). Each may be omitted or ``None``;
+            defaults to no covariates of that type.
         estimand : str
             ``"ATE"`` or ``"ATT"``.
         trim_quantile : float
@@ -2124,6 +2125,10 @@ class CausalInferenceModel:
         # ------------------------------------------------------------------
         # Step 0: Data prep
         # ------------------------------------------------------------------
+        categorical_vars = list(categorical_vars) if categorical_vars else []
+        binary_vars = list(binary_vars) if binary_vars else []
+        continuous_vars = list(continuous_vars) if continuous_vars else []
+
         # Build a single covariate list that covers both PS and outcome models.
         # baseline_var is treated as a confounder (included in both models)
         # because baseline performance typically influences treatment assignment.
@@ -2479,10 +2484,10 @@ class CausalInferenceModel:
         data: pd.DataFrame,
         outcome_var: str,
         treatment_var: str,
-        categorical_vars: List[str],
-        binary_vars: List[str],
-        continuous_vars: List[str],
         cluster_var: str,
+        categorical_vars: Optional[List[str]] = None,
+        binary_vars: Optional[List[str]] = None,
+        continuous_vars: Optional[List[str]] = None,
         estimand: str = "ATE",
         baseline_var: Optional[str] = None,
         project_path: Optional[str] = None,
@@ -2518,14 +2523,16 @@ class CausalInferenceModel:
             Name of outcome variable
         treatment_var : str
             Name of binary treatment variable
-        categorical_vars : List[str]
-            Categorical covariate names (will be one-hot encoded)
-        binary_vars : List[str]
-            Binary covariate names
-        continuous_vars : List[str]
-            Continuous covariate names
         cluster_var : str
             Name of clustering variable
+        categorical_vars : List[str], optional
+            Categorical covariate names (will be one-hot encoded). Omitted or
+            ``None`` means no categorical covariates.
+        binary_vars : List[str], optional
+            Binary covariate names. Omitted or ``None`` means no binary covariates.
+        continuous_vars : List[str], optional
+            Continuous covariate names. Omitted or ``None`` means no continuous
+            covariates.
         estimand : str, default="ATE"
             Target estimand: "ATE" (Average Treatment Effect) or "ATT" (Average
             Treatment Effect on the Treated). Determines weight construction.
@@ -3695,10 +3702,10 @@ class CausalInferenceModel:
         time_var: str,
         event_var: str,
         treatment_var: str,
-        categorical_vars: List[str],
-        binary_vars: List[str],
-        continuous_vars: List[str],
         cluster_var: str,
+        categorical_vars: Optional[List[str]] = None,
+        binary_vars: Optional[List[str]] = None,
+        continuous_vars: Optional[List[str]] = None,
         estimand: str = "ATT",
         project_path: Optional[str] = None,
         trim_quantile: float = 0.99,
@@ -3731,14 +3738,16 @@ class CausalInferenceModel:
             Name of event indicator column (1=event occurred, 0=censored)
         treatment_var : str
             Name of binary treatment variable
-        categorical_vars : List[str]
-            Categorical covariate names (will be one-hot encoded)
-        binary_vars : List[str]
-            Binary covariate names
-        continuous_vars : List[str]
-            Continuous covariate names
         cluster_var : str
             Name of clustering variable for robust standard errors
+        categorical_vars : List[str], optional
+            Categorical covariate names (will be one-hot encoded). Omitted or
+            ``None`` means no categorical covariates.
+        binary_vars : List[str], optional
+            Binary covariate names. Omitted or ``None`` means no binary covariates.
+        continuous_vars : List[str], optional
+            Continuous covariate names. Omitted or ``None`` means no continuous
+            covariates.
         estimand : str, default="ATT"
             Target estimand: "ATE" or "ATT". Determines IPTW weight construction.
         project_path : str, optional
@@ -4068,10 +4077,10 @@ class CausalInferenceModel:
         time_var: str,
         event_var: str,
         treatment_var: str,
-        categorical_vars: List[str],
-        binary_vars: List[str],
-        continuous_vars: List[str],
         cluster_var: str,
+        categorical_vars: Optional[List[str]] = None,
+        binary_vars: Optional[List[str]] = None,
+        continuous_vars: Optional[List[str]] = None,
         estimand: str = "ATE",
         project_path: Optional[str] = None,
         trim_quantile: float = 0.99,
@@ -4105,14 +4114,16 @@ class CausalInferenceModel:
             Name of event indicator column (1=event, 0=censored).
         treatment_var : str
             Name of binary treatment variable.
-        categorical_vars : List[str]
-            Categorical covariate names (will be one-hot encoded).
-        binary_vars : List[str]
-            Binary covariate names.
-        continuous_vars : List[str]
-            Continuous covariate names.
         cluster_var : str
             Clustering variable for robust standard errors.
+        categorical_vars : List[str], optional
+            Categorical covariate names (will be one-hot encoded). Omitted or
+            ``None`` means no categorical covariates.
+        binary_vars : List[str], optional
+            Binary covariate names. Omitted or ``None`` means no binary covariates.
+        continuous_vars : List[str], optional
+            Continuous covariate names. Omitted or ``None`` means no continuous
+            covariates.
         estimand : str, default="ATE"
             Target estimand: "ATE" or "ATT".
         project_path : str, optional
