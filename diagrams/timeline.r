@@ -74,24 +74,6 @@ p <- gg_vistime(
     axis.title.y = element_blank(),
     axis.line.y = element_blank(),       # Remove y-axis line
     aspect.ratio = 0.25                
-  ) +
-  
-  geom_vline(
-    xintercept = as.numeric(as.Date("2026-07-01")),  
-    linetype = "dotted",                              
-    color = "gray40",                                 
-    linewidth = 0.8                                   
-  ) +
-  # Add label for L&D Review line (just above x-axis)
-  annotate(
-    "text",
-    x = as.Date("2026-07-01"),
-    y = 0.65,  
-    label = "L&D Review",
-    angle = 90,  
-    vjust = -0.5,
-    size = 3.5,
-    color = "gray40"
   )
 
 
