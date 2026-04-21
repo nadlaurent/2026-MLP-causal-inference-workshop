@@ -1139,10 +1139,6 @@ class CausalInferenceModel:
 
         # ------------------------------------------------------------------
         # PH test on final model
-        # Note: a significant result here is EXPECTED and handled by design.
-        # The time interaction terms explicitly model how the treatment effect
-        # changes over time, so the model does not rely on the PH assumption
-        # holding. The test is reported for transparency only.
         # ------------------------------------------------------------------
         ph_test_results = None
         ph_assumption_met = None
@@ -1150,14 +1146,15 @@ class CausalInferenceModel:
         _print("\n--- Proportional Hazards Test ---")
         if time_interaction is not None:
             _print(
-                "NOTE: This model includes time interaction terms that explicitly\n"
-                "      account for a non-constant treatment effect over time. The\n"
-                "      'expected violation' applies to the treatment variable (and\n"
-                "      its time interactions) only — it does not invalidate the model.\n"
-                "      Violations for other covariates still warrant attention.\n"
-                "      Interpret covariate PH results; violations in confounders may\n"
-                "      bias effect estimates. Results are reported for transparency."
+                "NOTE: PH test is SKIPPED for time-interaction models.\n"
+                "      The person-period expanded data violates the independence\n"
+                "      assumption of the Schoenfeld residual test (same person\n"
+                "      contributes multiple rows), inflating test statistics.\n"
+                "      The time interaction model handles non-proportionality\n"
+                "      by design — no PH test is needed."
             )
+            ph_test_results = None
+            ph_assumption_met = None
         else:
             _print(
                 "NOTE: Standard Cox PH assumes proportional hazards.\n"
@@ -1165,60 +1162,54 @@ class CausalInferenceModel:
                 "      time_interaction='categorical' to model time-varying effects."
             )
 
-        try:
-            from lifelines.statistics import proportional_hazard_test
+        if time_interaction is None:
+            try:
+                from lifelines.statistics import proportional_hazard_test
 
-            ph_result = proportional_hazard_test(
-                cph,
-                cox_data,
-                time_transform="rank",
-            )
-
-            if ph_result.summary is not None and not ph_result.summary.empty:
-                ph_test_results = ph_result.summary.copy()
-
-                if time_interaction is not None:
-                    ph_test_results["note"] = ph_test_results.index.map(
-                        lambda v: (
-                            "Expected violation — modelled via time interaction"
-                            if v == treatment_var or v.startswith(f"{treatment_var}_x_")
-                            else ""
-                        )
+                # Suppress lifelines' auto-printed summary to avoid
+                # duplicate output (we print our own formatted version below).
+                import io, contextlib
+                with contextlib.redirect_stdout(io.StringIO()):
+                    ph_result = proportional_hazard_test(
+                        cph,
+                        cox_data,
+                        time_transform="rank",
                     )
-                else:
+
+                if ph_result.summary is not None and not ph_result.summary.empty:
+                    ph_test_results = ph_result.summary.copy()
                     ph_test_results["note"] = ""
 
-                # PH assumption met = treatment row passes at alpha
-                if treatment_var in ph_test_results.index.get_level_values(0):
-                    treat_p = float(
-                        ph_test_results.loc[treatment_var, "p"].iloc[0]
-                        if hasattr(ph_test_results.loc[treatment_var, "p"], "iloc")
-                        else ph_test_results.loc[treatment_var, "p"]
-                    )
-                    ph_assumption_met = treat_p >= alpha
+                    # PH assumption met = treatment row passes at alpha
+                    if treatment_var in ph_test_results.index.get_level_values(0):
+                        treat_p = float(
+                            ph_test_results.loc[treatment_var, "p"].iloc[0]
+                            if hasattr(ph_test_results.loc[treatment_var, "p"], "iloc")
+                            else ph_test_results.loc[treatment_var, "p"]
+                        )
+                        ph_assumption_met = treat_p >= alpha
+                    else:
+                        ph_assumption_met = True
+
+                    _print(ph_test_results[["test_statistic", "p", "note"]].to_string())
+
+                    if ph_assumption_met is False:
+                        _print(
+                            "\n  ⚠️  Treatment variable VIOLATES proportional hazards "
+                            "assumption.\n"
+                            "      The single HR may be misleading. Consider re-running "
+                            "with\n"
+                            "      time_interaction='categorical'."
+                        )
+                    elif ph_assumption_met is True:
+                        _print("\n  ✓ Proportional hazards assumption met for treatment.")
                 else:
-                    ph_assumption_met = True
+                    _print("PH test returned no results.")
+                    ph_assumption_met = None
 
-                _print(ph_test_results[["test_statistic", "p", "note"]].to_string())
-
-                # Warn if PH violated in standard model
-                if time_interaction is None and ph_assumption_met is False:
-                    _print(
-                        "\n  ⚠️  Treatment variable VIOLATES proportional hazards "
-                        "assumption.\n"
-                        "      The single HR may be misleading. Consider re-running "
-                        "with\n"
-                        "      time_interaction='categorical'."
-                    )
-                elif time_interaction is None and ph_assumption_met is True:
-                    _print("\n  ✓ Proportional hazards assumption met for treatment.")
-            else:
-                _print("PH test returned no results.")
+            except Exception as e:
+                _print(f"⚠️  PH test could not be completed: {e}")
                 ph_assumption_met = None
-
-        except Exception as e:
-            _print(f"⚠️  PH test could not be completed: {e}")
-            ph_assumption_met = None
 
         # ------------------------------------------------------------------
         # Extract hazard ratios
