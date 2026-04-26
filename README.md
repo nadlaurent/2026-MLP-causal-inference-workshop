@@ -1,6 +1,6 @@
-# 2026-siop-causal-inference-master-tutorial
+# 2026-MLP-causal-inference-workshop
 
-# No Experiment, No Problem? Causal Inference in Applied Quasi-Experimental Settings
+# From Prediction to Impact: Machine Learning Meets Econometrics for Causal Inference in Organizations
 
 A hands-on course on estimating causal treatment effects from observational HR data in quasi-experimental setting.
 
