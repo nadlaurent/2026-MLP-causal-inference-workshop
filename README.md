@@ -4,6 +4,12 @@
 
 A hands-on course on estimating causal treatment effects from observational HR data in quasi-experimental setting.
 
+## Before the Workshop
+
+Hi! Thanks a lot for signing up, we are thrilled to meet you in Prague soon. To let us know a bit more about your background, would you mind taking 5 minutes to complete 
+<a href="https://forms.cloud.microsoft/e/uasEWsQhtS" target="_blank" rel="noopener noreferrer">
+  📄 this form?</a> It will help us optimize the workshop's pace. It would be great if you can submit your response by 1 May 2026. Thank you!
+
 ## What You'll Learn
 
 This course walks through a real-world people analytics use case: **evaluating whether a manager training program causally improves leadership outcomes and team retention.** You'll learn to:
