@@ -64,7 +64,8 @@ and surfaces the failure — no summary artifact is emitted until the issues are
 
 Switch to the **Reviewer** agent. It checks both the design and the implementation, classifies
 every finding as design-level (back to Planner) or code-level (back to Implementer), and emits
-a routing block. Iterate until the Reviewer emits `terminal: true`.
+a routing block. Iterate until the Reviewer emits `terminal: true`. Then ask the Reviewer to use 
+all relevant files and artifacts to create a Word document describing the methodology and results of the analysis.
 
 ### Optional: use the Orchestrator as a single entry point
 
